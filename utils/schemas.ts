@@ -26,23 +26,31 @@ export function validateWithZodSchema<T>(
 }
 
 export const imageSchema = z.object({
-  image: validateFile(),
-});
+  image: z
+    .string()
+    .url({ message: "Image must be a valid URL" })
+    .refine((value) => value.startsWith("http://") || value.startsWith("https://"), {
+      message: "Image URL must start with http:// or https://",
+    })
+    .refine((value) => {
+      try {
+        const parsed = new URL(value);
+        const host = parsed.hostname.toLowerCase();
+        const path = parsed.pathname.toLowerCase();
 
-function validateFile() {
-  const maxUploadSize = 1024 * 1024 * 5; // 5MB
-  const acceptedFileTypes = ["image/"];
-  return z
-    .instanceof(File)
-    .refine((file) => {
-      return !file || file.size <= maxUploadSize;
-    }, "File size must be less than 5MB")
-    .refine((file) => {
-      return (
-        !file || acceptedFileTypes.some((type) => file.type.startsWith(type))
-      );
-    }, "File must be an image");
-}
+        if (host === "unsplash.com" && path.startsWith("/photos/")) {
+          return false;
+        }
+
+        return true;
+      } catch {
+        return false;
+      }
+    }, {
+      message:
+        "Please use a direct image URL (for Unsplash use images.unsplash.com, not unsplash.com/photos/...)",
+    }),
+});
 
 export const propertySchema = z.object({
   name: z

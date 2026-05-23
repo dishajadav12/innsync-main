@@ -5,17 +5,19 @@ import PropertyRating from "./PropertyRating";
 import FavoriteToggleButton from "./FavoriteToggleButton";
 import { PropertyCardProps } from "@/utils/types";
 import { formatCurrency } from "@/utils/format";
+import { getSafeImageSrc } from "@/utils/image";
 
 function PropertyCard({ property }: { property: PropertyCardProps }) {
   const { name, image, price } = property;
   const { country, id: propertyId, tagline } = property;
+  const safeImageSrc = getSafeImageSrc(image);
 
   return (
     <article className="group relative">
       <Link href={`/properties/${propertyId}`}>
         <div className="relative h-[300px] mb-2 overflow-hidden rounded-md">
           <Image
-            src={image}
+            src={safeImageSrc}
             fill
             sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw"
             alt={name}

@@ -13,6 +13,7 @@ import { links } from "@/utils/links";
 import SignOutLink from "./SignOutLink";
 import { SignedOut, SignedIn, SignInButton, SignUpButton } from "@clerk/nextjs";
 import { auth } from "@clerk/nextjs/server";
+import ThemeMenuItems from "./ThemeMenuItems";
 
 function LinksDropdown() {
   const { userId } = auth();
@@ -55,6 +56,7 @@ function LinksDropdown() {
             <SignOutLink />
           </DropdownMenuItem>
         </SignedIn>
+        <ThemeMenuItems />
       </DropdownMenuContent>
     </DropdownMenu>
   );

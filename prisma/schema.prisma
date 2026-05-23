@@ -50,6 +50,7 @@ model Property {
   name        String
   tagline     String
   category    String
+  city        String?
   image       String
   country     String
   description String

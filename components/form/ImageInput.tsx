@@ -6,14 +6,14 @@ function ImageInput() {
   return (
     <div className="mb-2">
       <Label htmlFor={name} className="capitalize">
-        Image
+        Image URL
       </Label>
       <Input
         id={name}
         name={name}
-        type="file"
+        type="url"
         required
-        accept="image/*"
+        placeholder="https://images.unsplash.com/..."
         className="max-w-xs"
       />
     </div>

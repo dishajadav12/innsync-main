@@ -3,7 +3,45 @@ import { LuFolderCheck } from "react-icons/lu";
 import Title from "./Title";
 
 function Amenities({ amenities }: { amenities: string }) {
-  const amenitiesList: Amenity[] = JSON.parse(amenities as string);
+  const amenitiesList: Amenity[] = (() => {
+    if (!amenities) return [];
+
+    try {
+      const parsed = JSON.parse(amenities as string);
+
+      if (Array.isArray(parsed)) {
+        if (parsed.length > 0 && typeof parsed[0] === "object" && parsed[0] !== null) {
+          return parsed
+            .map((item) => ({
+              name: String(item.name ?? "").toLowerCase().trim(),
+              selected: Boolean(item.selected),
+              icon: item.icon,
+            }))
+            .filter((item) => item.name);
+        }
+
+        return parsed
+          .map((item) => ({
+            name: String(item).toLowerCase().trim(),
+            selected: true,
+            icon: undefined,
+          }))
+          .filter((item) => item.name) as Amenity[];
+      }
+    } catch {
+      return amenities
+        .split(",")
+        .map((item) => ({
+          name: item.toLowerCase().trim(),
+          selected: true,
+          icon: undefined,
+        }))
+        .filter((item) => item.name) as Amenity[];
+    }
+
+    return [];
+  })();
+
   const noAmenities = amenitiesList.every((amenity) => !amenity.selected);
 
   if (noAmenities) {

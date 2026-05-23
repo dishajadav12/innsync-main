@@ -7,6 +7,7 @@ import ImageInput from "./ImageInput";
 import { SubmitButton } from "./Buttons";
 import { type actionFunction } from "@/utils/types";
 import { LuUser2 } from "react-icons/lu";
+import { getSafeImageSrc } from "@/utils/image";
 
 type ImageInputContainerProps = {
   image: string;
@@ -19,6 +20,7 @@ type ImageInputContainerProps = {
 function ImageInputContainer(props: ImageInputContainerProps) {
   const { image, name, action, text } = props;
   const [isUpdateFormVisible, setIsUpdateFormVisible] = useState(false);
+  const safeImageSrc = getSafeImageSrc(image);
 
   const userIcon = (
     <LuUser2 className="w-24 h-24 bg-primary rounded text-white mb-4" />
@@ -27,7 +29,7 @@ function ImageInputContainer(props: ImageInputContainerProps) {
     <div>
       {image ? (
         <Image
-          src={image}
+          src={safeImageSrc}
           alt={name}
           width={100}
           height={100}
