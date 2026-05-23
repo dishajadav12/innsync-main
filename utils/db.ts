@@ -15,6 +15,9 @@ const resolveDatasourceUrl = () => {
     process.env.POSTGRES_PRISMA_URL,
     process.env.POSTGRES_URL,
     process.env.DIRECT_URL,
+    process.env.DATABASE_VERCEL_PRISMA_DATABASE_URL,
+    process.env.DATABASE_VERCEL_POSTGRES_URL,
+    process.env.DATABASE_VERCEL_DATABASE_URL,
   ].filter((value): value is string => Boolean(value));
 
   if (process.env.NODE_ENV !== "production") {
