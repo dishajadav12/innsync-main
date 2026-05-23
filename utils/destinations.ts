@@ -26,22 +26,25 @@ export type Destination = {
   cities: string[];
 };
 
-export const destinations: Destination[] = destinationSeeds
-  .map((seed) => {
+export const destinations: Destination[] = destinationSeeds.reduce<Destination[]>(
+  (acc, seed) => {
     const country = formattedCountries.find((item) => item.code === seed.countryCode);
 
     if (!country) {
-      return null;
+      return acc;
     }
 
-    return {
+    acc.push({
       countryCode: country.code,
       countryName: country.name,
       flag: country.flag,
       cities: seed.cities,
-    };
-  })
-  .filter((destination): destination is Destination => Boolean(destination));
+    });
+
+    return acc;
+  },
+  []
+);
 
 export const getDestinationByCountryCode = (countryCode: string) =>
   destinations.find((item) => item.countryCode === countryCode);

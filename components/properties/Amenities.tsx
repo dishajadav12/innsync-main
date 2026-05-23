@@ -3,6 +3,12 @@ import { LuFolderCheck } from "react-icons/lu";
 import Title from "./Title";
 
 function Amenities({ amenities }: { amenities: string }) {
+  const toAmenity = (name: string, selected = true): Amenity => ({
+    name: name.toLowerCase().trim(),
+    selected,
+    icon: LuFolderCheck,
+  });
+
   const amenitiesList: Amenity[] = (() => {
     if (!amenities) return [];
 
@@ -12,31 +18,19 @@ function Amenities({ amenities }: { amenities: string }) {
       if (Array.isArray(parsed)) {
         if (parsed.length > 0 && typeof parsed[0] === "object" && parsed[0] !== null) {
           return parsed
-            .map((item) => ({
-              name: String(item.name ?? "").toLowerCase().trim(),
-              selected: Boolean(item.selected),
-              icon: item.icon,
-            }))
+            .map((item) => toAmenity(String(item.name ?? ""), Boolean(item.selected)))
             .filter((item) => item.name);
         }
 
         return parsed
-          .map((item) => ({
-            name: String(item).toLowerCase().trim(),
-            selected: true,
-            icon: undefined,
-          }))
-          .filter((item) => item.name) as Amenity[];
+          .map((item) => toAmenity(String(item), true))
+          .filter((item) => item.name);
       }
     } catch {
       return amenities
         .split(",")
-        .map((item) => ({
-          name: item.toLowerCase().trim(),
-          selected: true,
-          icon: undefined,
-        }))
-        .filter((item) => item.name) as Amenity[];
+        .map((item) => toAmenity(item, true))
+        .filter((item) => item.name);
     }
 
     return [];
