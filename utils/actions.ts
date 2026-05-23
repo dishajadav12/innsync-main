@@ -79,14 +79,19 @@ export const createProfileAction = async (
 };
 
 export const fetchProfileImage = async () => {
-  const { userId } = auth();
-  if (!userId) return null;
+  try {
+    const { userId } = auth();
+    if (!userId) return null;
 
-  const profile = await db.profile.findUnique({
-    where: { clerkId: userId },
-    select: { profileImage: true },
-  });
-  return profile?.profileImage ?? null;
+    const profile = await db.profile.findUnique({
+      where: { clerkId: userId },
+      select: { profileImage: true },
+    });
+    return profile?.profileImage ?? null;
+  } catch (error) {
+    console.error("Failed to fetch profile image:", error);
+    return null;
+  }
 };
 
 export const fetchProfile = async () => {
