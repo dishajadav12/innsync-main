@@ -177,27 +177,32 @@ export const fetchProperties = async ({
   search?: string;
   category?: string;
 }) => {
-  const properties = await db.property.findMany({
-    where: {
-      category,
-      OR: [
-        { name: { contains: search, mode: "insensitive" } },
-        { tagline: { contains: search, mode: "insensitive" } },
-      ],
-    },
-    select: {
-      id: true,
-      name: true,
-      tagline: true,
-      country: true,
-      image: true,
-      price: true,
-    },
-    orderBy: {
-      createdAt: "desc",
-    },
-  });
-  return properties;
+  try {
+    const properties = await db.property.findMany({
+      where: {
+        category,
+        OR: [
+          { name: { contains: search, mode: "insensitive" } },
+          { tagline: { contains: search, mode: "insensitive" } },
+        ],
+      },
+      select: {
+        id: true,
+        name: true,
+        tagline: true,
+        country: true,
+        image: true,
+        price: true,
+      },
+      orderBy: {
+        createdAt: "desc",
+      },
+    });
+    return properties;
+  } catch (error) {
+    console.error("Failed to fetch properties:", error);
+    return [];
+  }
 };
 
 export const fetchFavoriteId = async ({

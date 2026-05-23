@@ -14,3 +14,12 @@ innsync
 3. Reviews and ratings
 4. Admin dashboard with statistics
 5. Stripe integration for payments
+
+* Deployment (Vercel + Prisma/Postgres)
+1. Add these environment variables in Vercel Project Settings:
+	- `DATABASE_URL` (preferred)
+	- `DIRECT_URL` (recommended for Prisma migrations)
+2. If using Vercel Postgres integration, this app can also read:
+	- `POSTGRES_PRISMA_URL`
+	- `POSTGRES_URL`
+3. After setting env vars, redeploy the project.

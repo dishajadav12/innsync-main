@@ -1,6 +1,27 @@
 import { PrismaClient } from "@prisma/client";
 
+const resolveDatasourceUrl = () => {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.POSTGRES_URL ||
+    ""
+  );
+};
+
 const prismaClientSingleton = () => {
+  const datasourceUrl = resolveDatasourceUrl();
+
+  if (datasourceUrl) {
+    return new PrismaClient({
+      datasources: {
+        db: {
+          url: datasourceUrl,
+        },
+      },
+    });
+  }
+
   return new PrismaClient();
 };
 
