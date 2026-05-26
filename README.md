@@ -110,23 +110,23 @@ The specification was deliberately open-ended. Below are the key product decisio
 
 ### Q1 — Who should see recommendation history, and how long should it be kept?
 
-**Decision:** Admin-only. Stored permanently.
+**Decision:** Admin-only. Retained for 90 days, then pruned.
 
 Users have no access to past recommendation sessions. Instead, they can save individual properties from any recommendation result into destination-based collections — a more actionable, user-friendly primitive than a raw session log. Recommendation history is an internal ops and engineering tool, not a user-facing feature.
 
-History is stored permanently so the ops team can detect preference trends, score distribution shifts, and the downstream impact of catalogue changes over time.
+History is available to admins for operational analysis, but not stored forever. A cleanup action removes recommendation sessions older than 90 days (with `RecommendationResult` rows removed via cascade), keeping storage bounded while still preserving recent diagnostic value.
 
 **Tradeoffs:**
 
 | Tradeoff | Impact |
 |---|---|
-| Storage grows without bound | Every run writes 1 session + up to 20 result rows. No retention policy or cleanup job exists yet. Needs a scheduled archive after a defined window (e.g., 90 days) at production scale |
+| Long-range trend analysis is limited | Because history is pruned after 90 days, year-over-year recommendation pattern analysis is not possible unless sessions are archived to a warehouse before cleanup |
 | Anonymous sessions are lower quality | Unauthenticated users generate sessions with `profileId: null`. These cannot be tied to a person, making per-user preference analysis impossible for them |
 | Users cannot re-run a past search | If a user ran a great search last week, they must redo the 8-step wizard to get it back. Collections partially solve this for saved properties, but not for the full preference set |
 | GDPR / account deletion gap | Deleting a Clerk account sets `profileId` to `null` via `onDelete: SetNull`, but the session rows remain. A proper deletion flow would also purge or anonymise all associated session and result data |
 
 **Questions I'd raise in a real team:**
-- What is the intended data retention window for sessions?
+- Should 90-day retention be enough for ops and product analytics, or should we add an archive pipeline before pruning?
 - Should users eventually have a "recent searches" shortcut, or is collections-only sufficient?
 - Does account deletion need to fully erase recommendation history, or is anonymisation (nullify profileId) sufficient for compliance?
 
