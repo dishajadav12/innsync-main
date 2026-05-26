@@ -1233,7 +1233,7 @@ export const cleanupOldRecommendationSessionsAction = async (): Promise<{ messag
 
 export const fetchRecommendationSessions = async () => {
   await getAdminUser();
-  return db.recommendationSession.findMany({
+  const sessions = await db.recommendationSession.findMany({
     orderBy: { createdAt: "desc" },
     take: 200,
     include: {
@@ -1256,6 +1256,57 @@ export const fetchRecommendationSessions = async () => {
         },
       },
     },
+  });
+
+  const allPropertyIds = Array.from(
+    new Set(sessions.flatMap((session) => session.results.map((result) => result.propertyId)))
+  );
+
+  if (allPropertyIds.length === 0) {
+    return sessions.map((session) => ({
+      ...session,
+      hasHeldPropertyAfterCreated: false,
+      heldPropertyNamesAfterCreated: [] as string[],
+    }));
+  }
+
+  const heldProperties = await db.property.findMany({
+    where: {
+      id: { in: allPropertyIds },
+      isOnHold: true,
+    },
+    select: {
+      id: true,
+      name: true,
+      updatedAt: true,
+    },
+  });
+
+  const heldById = new Map(heldProperties.map((property) => [property.id, property]));
+
+  return sessions.map((session) => {
+    const heldPropertyNamesAfterCreated = Array.from(
+      new Set(
+        session.results
+          .map((result) => {
+            const heldProperty = heldById.get(result.propertyId);
+            if (!heldProperty || heldProperty.updatedAt <= session.createdAt) return null;
+            return heldProperty.name;
+          })
+          .filter((name): name is string => Boolean(name))
+      )
+    );
+
+    const hasHeldPropertyAfterCreated = session.results.some((result) => {
+      const heldProperty = heldById.get(result.propertyId);
+      return Boolean(heldProperty && heldProperty.updatedAt > session.createdAt);
+    });
+
+    return {
+      ...session,
+      hasHeldPropertyAfterCreated,
+      heldPropertyNamesAfterCreated,
+    };
   });
 };
 

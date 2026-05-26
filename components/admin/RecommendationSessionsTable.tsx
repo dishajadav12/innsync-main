@@ -65,6 +65,14 @@ function SessionCard({ session }: { session: Session }) {
     ? `${session.profile.firstName} ${session.profile.lastName}`
     : null;
   const gemini = isGemini(session.modelUsed);
+  const isActive = session.status === "active";
+  const holdAfterCreated =
+    session.hasHeldPropertyAfterCreated ||
+    (session.invalidationReason?.toLowerCase().includes("put on hold") ?? false);
+  const holdBadgeTooltip =
+    session.heldPropertyNamesAfterCreated?.length
+      ? `Hold after created: ${session.heldPropertyNamesAfterCreated.join(", ")}`
+      : "One or more recommended properties were put on hold after this session was created.";
 
   return (
     <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
@@ -83,15 +91,36 @@ function SessionCard({ session }: { session: Session }) {
             )}
             <p className="text-xs text-muted-foreground mt-0.5">{timeAgo(session.createdAt)}</p>
           </div>
-          <span
-            className={`text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 ${
-              gemini
-                ? "bg-violet-100 text-violet-700"
-                : "bg-slate-100 text-slate-600"
-            }`}
-          >
-            {gemini ? "Gemini AI" : "Rule-based"}
-          </span>
+          <div className="flex flex-wrap items-center justify-end gap-1.5">
+            <span
+              className={`text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 ${
+                isActive
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {isActive ? "Active" : "Inactive"}
+            </span>
+
+            {holdAfterCreated && (
+              <span
+                title={holdBadgeTooltip}
+                className="text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 bg-amber-100 text-amber-700 cursor-help"
+              >
+                Hold after created
+              </span>
+            )}
+
+            <span
+              className={`text-xs font-semibold px-2.5 py-0.5 rounded-full shrink-0 ${
+                gemini
+                  ? "bg-violet-100 text-violet-700"
+                  : "bg-slate-100 text-slate-600"
+              }`}
+            >
+              {gemini ? "Gemini AI" : "Rule-based"}
+            </span>
+          </div>
         </div>
 
         {/* Preference chips */}
