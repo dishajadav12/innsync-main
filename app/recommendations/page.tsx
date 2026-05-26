@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SaveToCollectionButton } from "@/components/recommendations/SaveToCollectionButton";
 
 type LocationDestination = {
   countryCode: string;
@@ -674,6 +675,14 @@ function RecommendationPage() {
                   <Button asChild className="w-full rounded-full">
                     <Link href={`/properties/${item.propertyId}`}>View Property Details</Link>
                   </Button>
+                  <SaveToCollectionButton
+                    propertyId={item.propertyId}
+                    propertyName={item.propertyName}
+                    propertyImage={item.propertyImage ?? ""}
+                    matchScore={item.matchScore}
+                    country={item.state ?? ""}
+                    city={item.city ?? ""}
+                  />
                 </CardContent>
               </Card>
             ))}

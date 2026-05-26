@@ -1,4 +1,5 @@
 import { z } from "zod";
+import db from "@/utils/db";
 
 export type UserPreferences = {
   country?: string[];
@@ -504,4 +505,55 @@ export const buildFallbackResponse = (
       };
     }),
   } satisfies RecommendationResponse;
+};
+
+export type SessionPersistInput = {
+  profileId:      string | null;
+  preferences:    UserPreferences;
+  topMatchReason: string;
+  totalAnalyzed:  number;
+  modelUsed:      string;
+  results: Array<{
+    propertyId:     string;
+    propertyName:   string;
+    rank:           number;
+    matchScore:     number;
+    matchReasons:   string[];
+    strengths:      string[];
+    concerns:       string[];
+    reviewInsights: { commonPositiveThemes: string[]; commonNegativeThemes: string[] };
+    budgetFit:      { withinBudget: boolean; priceAssessment: string };
+    amenityMatch:   { matched: string[]; missing: string[] };
+    aiSummary:      string;
+  }>;
+};
+
+export const persistRecommendationSession = async (
+  input: SessionPersistInput
+): Promise<void> => {
+  await db.recommendationSession.create({
+    data: {
+      profileId:      input.profileId,
+      preferences:    input.preferences as object,
+      topMatchReason: input.topMatchReason,
+      totalAnalyzed:  input.totalAnalyzed,
+      modelUsed:      input.modelUsed,
+      status:         "active",
+      results: {
+        create: input.results.map((r) => ({
+          propertyId:     r.propertyId,
+          propertyName:   r.propertyName,
+          rank:           r.rank,
+          matchScore:     r.matchScore,
+          matchReasons:   r.matchReasons,
+          strengths:      r.strengths,
+          concerns:       r.concerns,
+          reviewInsights: r.reviewInsights as object,
+          budgetFit:      r.budgetFit as object,
+          amenityMatch:   r.amenityMatch as object,
+          aiSummary:      r.aiSummary,
+        })),
+      },
+    },
+  });
 };

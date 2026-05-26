@@ -1,11 +1,14 @@
 import { NextRequest } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { Prisma } from "@prisma/client";
 import db from "@/utils/db";
 import {
   buildFallbackResponse,
   buildPrompt,
   computeBackendScore,
   extractJsonObject,
+  persistRecommendationSession,
   toModelPayload,
   type UserPreferences,
   validateRecommendationResponse,
@@ -73,6 +76,8 @@ export const POST = async (req: NextRequest) => {
     return Response.json({ message: "Invalid JSON body" }, { status: 400 });
   }
 
+  const { userId } = auth();
+
   const preferences = (body.preferences ?? {}) as UserPreferences;
   const fetchSize = Math.min(Math.max(Number(body.fetchSize ?? DEFAULT_FETCH_SIZE), 20), 200);
   const shortlistSize = Math.min(
@@ -129,10 +134,10 @@ export const POST = async (req: NextRequest) => {
     },
   };
 
-  const runCandidatesQuery = async (queryWhere: Record<string, unknown>) => {
+  const runCandidatesQuery = async (queryWhere: Prisma.PropertyWhereInput) => {
     try {
       return await db.property.findMany({
-        where: queryWhere,
+        where: { ...queryWhere, isOnHold: false },
         ...queryOptions,
       });
     } catch (error) {
@@ -140,13 +145,10 @@ export const POST = async (req: NextRequest) => {
         throw error;
       }
 
-      const { city, ...fallbackWhereClause } = queryWhere as {
-        city?: unknown;
-        [key: string]: unknown;
-      };
+      const { city, ...fallbackWhereClause } = queryWhere;
 
       return db.property.findMany({
-        where: fallbackWhereClause,
+        where: { ...fallbackWhereClause, isOnHold: false },
         ...queryOptions,
       });
     }
@@ -163,6 +165,7 @@ export const POST = async (req: NextRequest) => {
     candidates.length >= Math.max(shortlistSize, 10) || hasLocationPreference
       ? candidates
       : await db.property.findMany({
+          where: { isOnHold: false },
           ...queryOptions,
         });
 
@@ -240,13 +243,28 @@ export const POST = async (req: NextRequest) => {
   const geminiApiKey = process.env.GEMINI_API_KEY;
   if (!geminiApiKey) {
     const fallback = buildFallbackResponse(preferences, scored);
-    return Response.json(
-      {
-        ...fallback,
-        recommendations: sortChronological(fallback.recommendations).slice(0, resultSize),
-      },
-      { status: 200 }
-    );
+    const sorted1 = sortChronological(fallback.recommendations).slice(0, resultSize);
+    persistRecommendationSession({
+      profileId: userId ?? null,
+      preferences,
+      topMatchReason: fallback.summary.topMatchReason,
+      totalAnalyzed: fallback.summary.totalAnalyzed,
+      modelUsed: "fallback",
+      results: sorted1.map((r, idx) => ({
+        propertyId: r.propertyId,
+        propertyName: r.propertyName,
+        rank: idx + 1,
+        matchScore: r.matchScore,
+        matchReasons: r.matchReasons ?? [],
+        strengths: r.strengths ?? [],
+        concerns: r.concerns ?? [],
+        reviewInsights: r.reviewInsights ?? { commonPositiveThemes: [], commonNegativeThemes: [] },
+        budgetFit: r.budgetFit ?? { withinBudget: true, priceAssessment: "" },
+        amenityMatch: r.amenityMatch ?? { matched: [], missing: [] },
+        aiSummary: r.aiSummary ?? "",
+      })),
+    }).catch((err) => console.error("[RecommendationSession] persist failed:", err));
+    return Response.json({ ...fallback, recommendations: sorted1 }, { status: 200 });
   }
 
   try {
@@ -274,21 +292,51 @@ export const POST = async (req: NextRequest) => {
       state: propertyById.get(item.propertyId)?.country ?? item.state,
     }));
 
-    return Response.json(
-      {
-        ...validated,
-        recommendations: sortChronological(enrichedRecommendations).slice(0, resultSize),
-      },
-      { status: 200 }
-    );
+    const sorted2 = sortChronological(enrichedRecommendations).slice(0, resultSize);
+    persistRecommendationSession({
+      profileId: userId ?? null,
+      preferences,
+      topMatchReason: validated.summary.topMatchReason,
+      totalAnalyzed: validated.summary.totalAnalyzed,
+      modelUsed: "gemini-1.5-pro",
+      results: sorted2.map((r, idx) => ({
+        propertyId: r.propertyId,
+        propertyName: r.propertyName,
+        rank: idx + 1,
+        matchScore: r.matchScore,
+        matchReasons: r.matchReasons ?? [],
+        strengths: r.strengths ?? [],
+        concerns: r.concerns ?? [],
+        reviewInsights: r.reviewInsights ?? { commonPositiveThemes: [], commonNegativeThemes: [] },
+        budgetFit: r.budgetFit ?? { withinBudget: true, priceAssessment: "" },
+        amenityMatch: r.amenityMatch ?? { matched: [], missing: [] },
+        aiSummary: r.aiSummary ?? "",
+      })),
+    }).catch((err) => console.error("[RecommendationSession] persist failed:", err));
+    return Response.json({ ...validated, recommendations: sorted2 }, { status: 200 });
   } catch {
-    const fallback = buildFallbackResponse(preferences, scored);
-    return Response.json(
-      {
-        ...fallback,
-        recommendations: sortChronological(fallback.recommendations).slice(0, resultSize),
-      },
-      { status: 200 }
-    );
+    const fallback2 = buildFallbackResponse(preferences, scored);
+    const sorted3 = sortChronological(fallback2.recommendations).slice(0, resultSize);
+    persistRecommendationSession({
+      profileId: userId ?? null,
+      preferences,
+      topMatchReason: fallback2.summary.topMatchReason,
+      totalAnalyzed: fallback2.summary.totalAnalyzed,
+      modelUsed: "fallback",
+      results: sorted3.map((r, idx) => ({
+        propertyId: r.propertyId,
+        propertyName: r.propertyName,
+        rank: idx + 1,
+        matchScore: r.matchScore,
+        matchReasons: r.matchReasons ?? [],
+        strengths: r.strengths ?? [],
+        concerns: r.concerns ?? [],
+        reviewInsights: r.reviewInsights ?? { commonPositiveThemes: [], commonNegativeThemes: [] },
+        budgetFit: r.budgetFit ?? { withinBudget: true, priceAssessment: "" },
+        amenityMatch: r.amenityMatch ?? { matched: [], missing: [] },
+        aiSummary: r.aiSummary ?? "",
+      })),
+    }).catch((err) => console.error("[RecommendationSession] persist failed:", err));
+    return Response.json({ ...fallback2, recommendations: sorted3 }, { status: 200 });
   }
 };

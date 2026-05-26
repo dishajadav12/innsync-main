@@ -15,10 +15,11 @@ type ImageInputContainerProps = {
   action: actionFunction;
   text: string;
   children?: React.ReactNode;
+  disabled?: boolean;
 };
 
 function ImageInputContainer(props: ImageInputContainerProps) {
-  const { image, name, action, text } = props;
+  const { image, name, action, text, disabled } = props;
   const [isUpdateFormVisible, setIsUpdateFormVisible] = useState(false);
   const safeImageSrc = getSafeImageSrc(image);
 
@@ -42,10 +43,11 @@ function ImageInputContainer(props: ImageInputContainerProps) {
         variant="outline"
         size="sm"
         onClick={() => setIsUpdateFormVisible((prev) => !prev)}
+        disabled={disabled}
       >
         {text}
       </Button>
-      {isUpdateFormVisible && (
+      {!disabled && isUpdateFormVisible && (
         <div className="max-w-lg mt-4">
           <FormContainer action={action}>
             {props.children}

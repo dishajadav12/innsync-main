@@ -14,6 +14,7 @@ import { propertySchema } from "./schemas";
 import { Console } from "console";
 import { calculateTotals } from "./calculateTotals";
 import { formatDate } from "./format";
+import { toModelPayload } from "@/utils/recommendation";
 
 const getAuthUser = async () => {
   const { userId } = auth();
@@ -185,6 +186,7 @@ export const fetchProperties = async ({
   try {
     const properties = await db.property.findMany({
       where: {
+        isOnHold: false,
         category,
         OR: [
           { name: { contains: search, mode: "insensitive" } },
@@ -539,6 +541,7 @@ export const fetchRentals = async () => {
       id: true,
       name: true,
       price: true,
+      isOnHold: true,
     },
   });
 
@@ -735,6 +738,231 @@ export const fetchChartsData = async () => {
   return bookingsPerMonth;
 };
 
+const findBestCollectionReplacement = async (
+  _collectionId: string,
+  excludedPropertyIds: string[]
+) => {
+  const candidates = await db.property.findMany({
+    where: {
+      isOnHold: false,
+      id: { notIn: excludedPropertyIds },
+    },
+    take: 60,
+    orderBy: { updatedAt: "desc" },
+    include: {
+      reviews:  { select: { rating: true, comment: true } },
+      bookings: { where: { paymentStatus: true }, select: { id: true } },
+    },
+  });
+
+  if (candidates.length === 0) return null;
+
+  const scored = candidates
+    .map((property) => {
+      const payload = toModelPayload({
+        id:           property.id,
+        name:         property.name,
+        image:        property.image,
+        category:     property.category,
+        city:         property.city,
+        country:      property.country,
+        description:  property.description,
+        price:        property.price,
+        guests:       property.guests,
+        amenitiesRaw: property.amenities,
+        reviews:      property.reviews,
+        bookingCount: property.bookings.length,
+      });
+      return { payload, score: payload.averageRating * 10 + payload.bookingCount };
+    })
+    .sort((a, b) => b.score - a.score);
+
+  return scored[0]?.payload ?? null;
+};
+
+const swapHeldPropertyInCollections = async (
+  heldPropertyId:    string,
+  _heldPropertyName: string
+): Promise<void> => {
+  const affectedItems = await db.collectionItem.findMany({
+    where: { propertyId: heldPropertyId },
+    include: {
+      collection: {
+        select: {
+          id: true,
+          items: { select: { propertyId: true } },
+        },
+      },
+    },
+  });
+
+  if (affectedItems.length === 0) return;
+
+  for (const item of affectedItems) {
+    const idsInCollection = item.collection.items.map((i: { propertyId: string }) => i.propertyId);
+    const excludedIds = Array.from(new Set([...idsInCollection, heldPropertyId]));
+
+    const replacement = await findBestCollectionReplacement(item.collectionId, excludedIds);
+
+    if (replacement) {
+      await db.collectionItem.update({
+        where: { id: item.id },
+        data: {
+          propertyId:    replacement.id,
+          propertyName:  replacement.name,
+          propertyImage: replacement.image,
+          matchScore:    Math.round(replacement.averageRating * 10 + replacement.bookingCount),
+        },
+      });
+    } else {
+      await db.collectionItem.delete({
+        where: { id: item.id },
+      });
+    }
+  }
+};
+
+export const togglePropertyHoldAction = async (prevState: {
+  propertyId:        string;
+  currentHoldStatus: boolean;
+}): Promise<{ message: string }> => {
+  await getAdminUser();
+  const { propertyId, currentHoldStatus } = prevState;
+  const newHoldStatus = !currentHoldStatus;
+
+  try {
+    const property = await db.property.findUnique({
+      where: { id: propertyId },
+      select: { name: true },
+    });
+    if (!property) return { message: "Property not found" };
+
+    await db.property.update({
+      where: { id: propertyId },
+      data:  { isOnHold: newHoldStatus },
+    });
+
+    if (newHoldStatus) {
+      await swapHeldPropertyInCollections(propertyId, property.name);
+    }
+
+    revalidatePath("/admin/listings");
+    return {
+      message: newHoldStatus
+        ? `"${property.name}" put on hold. Saved collections updated.`
+        : `"${property.name}" is back on the market.`,
+    };
+  } catch (error) {
+    return renderError(error);
+  }
+};
+
+export const toggleHostPropertyHoldAction = async (prevState: {
+  propertyId: string;
+  currentHoldStatus: boolean;
+}): Promise<{ message: string }> => {
+  const user = await getAuthUser();
+  const { propertyId, currentHoldStatus } = prevState;
+  const newHoldStatus = !currentHoldStatus;
+  try {
+    await db.property.update({
+      where: { id: propertyId, profileId: user.id },
+      data: { isOnHold: newHoldStatus },
+    });
+    revalidatePath("/rentals");
+    return {
+      message: newHoldStatus
+        ? "Property put on hold. It will not appear in listings or recommendations."
+        : "Property is back on the market.",
+    };
+  } catch (error) {
+    return renderError(error);
+  }
+};
+
+export const fetchAllPropertiesForAdmin = async () => {
+  await getAdminUser();
+  return db.property.findMany({
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      tagline: true,
+      description: true,
+      category: true,
+      city: true,
+      country: true,
+      price: true,
+      image: true,
+      guests: true,
+      bedrooms: true,
+      beds: true,
+      baths: true,
+      amenities: true,
+      isOnHold: true,
+      createdAt: true,
+      _count: {
+        select: { bookings: true, reviews: true },
+      },
+    },
+  });
+};
+
+export const adminFetchPropertyDetails = async (propertyId: string) => {
+  await getAdminUser();
+  return db.property.findUnique({
+    where: { id: propertyId },
+    select: {
+      id: true,
+      name: true,
+      tagline: true,
+      description: true,
+      category: true,
+      country: true,
+      price: true,
+      image: true,
+      guests: true,
+      bedrooms: true,
+      beds: true,
+      baths: true,
+      amenities: true,
+      isOnHold: true,
+    },
+  });
+};
+
+export const adminUpdatePropertyAction = async (
+  prevState: any,
+  formData: FormData
+): Promise<{ message: string }> => {
+  await getAdminUser();
+  const propertyId = formData.get("id") as string;
+  try {
+    const rawData = Object.fromEntries(formData);
+    const validatedFields = validateWithZodSchema(propertySchema, rawData);
+    await db.property.update({ where: { id: propertyId }, data: validatedFields });
+    revalidatePath("/admin/listings");
+    return { message: "Listing updated." };
+  } catch (error) {
+    return renderError(error);
+  }
+};
+
+export const adminDeletePropertyAction = async ({
+  propertyId,
+}: {
+  propertyId: string;
+}): Promise<{ message: string }> => {
+  await getAdminUser();
+  try {
+    await db.property.delete({ where: { id: propertyId } });
+    revalidatePath("/admin/listings");
+    return { message: "Listing deleted." };
+  } catch (error) {
+    return renderError(error);
+  }
+};
+
 export const fetchReservationStats = async () => {
   const user = await getAuthUser();
   const properties = await db.property.count({
@@ -760,4 +988,96 @@ export const fetchReservationStats = async () => {
     nights: totals._sum.totalNights || 0,
     amount: totals._sum.orderTotal || 0,
   };
+}
+
+// ── Collections ──
+
+export const saveToCollectionAction = async (prevState: {
+  propertyId:    string;
+  propertyName:  string;
+  propertyImage: string;
+  matchScore:    number;
+  country:       string;
+  city:          string;
+}): Promise<{ message: string }> => {
+  const user = await getAuthUser();
+  const { propertyId, propertyName, propertyImage, matchScore, country, city } = prevState;
+  const collectionName = city ? `${city}, ${country}` : country;
+  try {
+    const collection = await db.collection.upsert({
+      where: {
+        profileId_country_city: { profileId: user.id, country, city },
+      },
+      update: {},
+      create: { profileId: user.id, country, city, name: collectionName },
+    });
+    await db.collectionItem.create({
+      data: { collectionId: collection.id, propertyId, propertyName, propertyImage, matchScore },
+    });
+    return { message: `Saved to your ${collectionName} collection` };
+  } catch (error) {
+    if ((error as any)?.code === "P2002") {
+      return { message: "Already saved to this collection" };
+    }
+    return renderError(error);
+  }
 };
+
+export const fetchUserCollections = async () => {
+  const user = await getAuthUser();
+  return db.collection.findMany({
+    where:   { profileId: user.id },
+    orderBy: { updatedAt: "desc" },
+    include: {
+      items:  { orderBy: { addedAt: "desc" } },
+      _count: { select: { items: true } },
+    },
+  });
+};
+
+export const removeFromCollectionAction = async (prevState: {
+  itemId: string;
+}): Promise<{ message: string }> => {
+  const user = await getAuthUser();
+  try {
+    await db.collectionItem.delete({
+      where: {
+        id:         prevState.itemId,
+        collection: { profileId: user.id },
+      },
+    });
+    revalidatePath("/collections");
+    return { message: "Removed from collection" };
+  } catch (error) {
+    return renderError(error);
+  }
+};
+
+export const fetchRecommendationSessions = async () => {
+  await getAdminUser();
+  return db.recommendationSession.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 200,
+    include: {
+      profile: {
+        select: { firstName: true, lastName: true, email: true },
+      },
+      results: {
+        orderBy: { rank: "asc" },
+        select: {
+          id: true,
+          propertyId: true,
+          propertyName: true,
+          rank: true,
+          matchScore: true,
+          aiSummary: true,
+          replacedPropertyId: true,
+          replacedPropertyName: true,
+          replacedAt: true,
+          replacedReason: true,
+        },
+      },
+    },
+  });
+};
+

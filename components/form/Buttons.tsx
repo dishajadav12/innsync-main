@@ -7,17 +7,20 @@ import { FaRegHeart, FaHeart } from "react-icons/fa";
 import { LuTrash2, LuPenSquare } from "react-icons/lu";
 
 type btnSize = "default" | "sm" | "lg";
+type btnVariant = "default" | "destructive" | "outline" | "secondary" | "ghost" | "link";
 
 type SubmitButtonProps = {
   className?: string;
   text?: string;
   size?: btnSize;
+  variant?: btnVariant;
 };
 
 export function SubmitButton({
   className = "",
   text = "submit",
   size = "lg",
+  variant,
 }: SubmitButtonProps) {
   const { pending } = useFormStatus();
   return (
@@ -26,6 +29,7 @@ export function SubmitButton({
       disabled={pending}
       className={`capitalize ${className}`}
       size={size}
+      variant={variant}
     >
       {pending ? (
         <>

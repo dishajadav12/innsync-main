@@ -1,5 +1,5 @@
 import EmptyList from '@/components/home/EmptyList';
-import { fetchRentals, deleteRentalAction } from '@/utils/actions';
+import { fetchRentals, deleteRentalAction, toggleHostPropertyHoldAction } from '@/utils/actions';
 import Link from 'next/link';
 
 import { formatCurrency } from '@/utils/format';
@@ -14,7 +14,7 @@ import {
 } from '@/components/ui/table';
 
 import FormContainer from '@/components/form/FormContainer';
-import { IconButton } from '@/components/form/Buttons';
+import { IconButton, SubmitButton } from '@/components/form/Buttons';
 
 async function RentalsPage() {
   const rentals = await fetchRentals();
@@ -44,7 +44,7 @@ async function RentalsPage() {
         </TableHeader>
         <TableBody>
           {rentals.map((rental) => {
-            const { id: propertyId, name, price } = rental;
+            const { id: propertyId, name, price, isOnHold } = rental;
             const { totalNightsSum, orderTotalSum } = rental;
             return (
               <TableRow key={propertyId}>
@@ -65,6 +65,7 @@ async function RentalsPage() {
                     <IconButton actionType='edit'></IconButton>
                   </Link>
                   <DeleteRental propertyId={propertyId} />
+                  <HostHoldToggleButton propertyId={propertyId} isOnHold={isOnHold} />
                 </TableCell>
               </TableRow>
             );
@@ -80,6 +81,19 @@ function DeleteRental({ propertyId }: { propertyId: string }) {
   return (
     <FormContainer action={deleteRental}>
       <IconButton actionType='delete' />
+    </FormContainer>
+  );
+}
+
+function HostHoldToggleButton({ propertyId, isOnHold }: { propertyId: string; isOnHold: boolean }) {
+  const toggleAction = toggleHostPropertyHoldAction.bind(null, { propertyId, currentHoldStatus: isOnHold });
+  return (
+    <FormContainer action={toggleAction}>
+      <SubmitButton
+        text={isOnHold ? 'Unhold' : 'Hold'}
+        size='sm'
+        className={isOnHold ? 'bg-red-600 hover:bg-red-700 text-white' : ''}
+      />
     </FormContainer>
   );
 }

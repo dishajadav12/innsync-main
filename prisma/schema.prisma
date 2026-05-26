@@ -2,7 +2,6 @@ datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL")
   directUrl = env("DIRECT_URL")
-  
 }
 
 generator client {
@@ -10,40 +9,22 @@ generator client {
 }
 
 model Profile {
-  id           String     @id @default(uuid())
-  clerkId      String     @unique
-  firstName    String
-  lastName     String
-  username     String
-  email        String
-  profileImage String
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
-  properties   Property[]
-  favorites    Favorite[]
-  reviews      Review[]
-  bookings Booking[]
+  id                     String                  @id @default(uuid())
+  clerkId                String                  @unique
+  firstName              String
+  lastName               String
+  username               String
+  email                  String
+  profileImage           String
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @updatedAt
+  properties             Property[]
+  favorites              Favorite[]
+  reviews                Review[]
+  bookings               Booking[]
+  recommendationSessions RecommendationSession[]
+  collections            Collection[]
 }
-
-// model Property {
-//   id          String     @id @default(uuid())
-//   name        String
-//   tagline     String
-//   category    String
-//   image       String
-//   country     String
-//   description String
-//   price       Int
-//   guests      Int
-//   bedrooms    Int
-//   beds        Int
-//   baths       Int
-//   amenities   String
-//   createdAt   DateTime   @default(now())
-//   updatedAt   DateTime   @updatedAt
-//   profile     Profile    @relation(fields: [profileId], references: [clerkId], onDelete: Cascade)
-//   profileId   String
-// }
 
 model Property {
   id          String     @id @default(uuid())
@@ -60,13 +41,14 @@ model Property {
   beds        Int
   baths       Int
   amenities   String
+  isOnHold    Boolean    @default(false)
   createdAt   DateTime   @default(now())
   updatedAt   DateTime   @updatedAt
   profile     Profile    @relation(fields: [profileId], references: [clerkId], onDelete: Cascade)
   profileId   String
   favorites   Favorite[]
   reviews     Review[]
-  bookings Booking[]
+  bookings    Booking[]
 }
 
 model Favorite {
@@ -94,20 +76,95 @@ model Review {
 }
 
 model Booking {
-  id        String   @id @default(uuid())
-  profile   Profile  @relation(fields: [profileId], references: [clerkId], onDelete: Cascade)
-  profileId String
-  property   Property  @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  propertyId String
-  orderTotal     Int
-  totalNights    Int
-  checkIn   DateTime
-  checkOut  DateTime
-  paymentStatus Boolean @default(false)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id            String   @id @default(uuid())
+  profile       Profile  @relation(fields: [profileId], references: [clerkId], onDelete: Cascade)
+  profileId     String
+  property      Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  propertyId    String
+  orderTotal    Int
+  totalNights   Int
+  checkIn       DateTime
+  checkOut      DateTime
+  paymentStatus Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 }
 
+model RecommendationSession {
+  id                 String                 @id @default(uuid())
+  profileId          String?
+  profile            Profile?               @relation(fields: [profileId], references: [clerkId], onDelete: SetNull)
+  preferences        Json
+  totalAnalyzed      Int
+  topMatchReason     String
+  modelUsed          String                 @default("gemini-1.5-pro")
+  status             String                 @default("active")
+  invalidatedAt      DateTime?
+  invalidationReason String?
+  supersededById     String?
+  createdAt          DateTime               @default(now())
+  results            RecommendationResult[]
 
+  @@index([profileId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([profileId, status])
+}
 
+// propertyId is intentionally a plain String with no @relation to Property.
+// Historical recommendation records must survive property deletion.
+model RecommendationResult {
+  id             String                @id @default(uuid())
+  session        RecommendationSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId      String
+  propertyId     String
+  propertyName   String
+  rank           Int
+  matchScore     Int
+  matchReasons   Json
+  strengths      Json
+  concerns       Json
+  reviewInsights Json
+  budgetFit      Json
+  amenityMatch   Json
+  aiSummary            String
+  createdAt            DateTime              @default(now())
+  replacedPropertyId   String?
+  replacedPropertyName String?
+  replacedAt           DateTime?
+  replacedReason       String?
+
+  @@index([sessionId])
+  @@index([propertyId])
+  @@index([sessionId, rank])
+}
+
+model Collection {
+  id        String           @id @default(uuid())
+  profile   Profile          @relation(fields: [profileId], references: [clerkId], onDelete: Cascade)
+  profileId String
+  country   String
+  city      String
+  name      String
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  items     CollectionItem[]
+
+  @@unique([profileId, country, city])
+  @@index([profileId])
+}
+
+model CollectionItem {
+  id            String     @id @default(uuid())
+  collection    Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  collectionId  String
+  propertyId    String
+  propertyName  String
+  propertyImage String
+  matchScore    Int?
+  addedAt       DateTime   @default(now())
+
+  @@unique([collectionId, propertyId])
+  @@index([collectionId])
+}
 
