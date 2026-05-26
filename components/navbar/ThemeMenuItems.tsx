@@ -1,17 +1,31 @@
 "use client";
 
 import { useTheme } from "next-themes";
-import { DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
+import { LuSun, LuMoon, LuMonitor } from "react-icons/lu";
 
+const THEME_OPTIONS = [
+  { label: "Light",  value: "light",  Icon: LuSun     },
+  { label: "Dark",   value: "dark",   Icon: LuMoon    },
+  { label: "System", value: "system", Icon: LuMonitor },
+] as const;
+
+// Shown only on mobile (md:hidden) — desktop has a dedicated DarkMode toggle in the navbar.
 function ThemeMenuItems() {
   const { setTheme } = useTheme();
 
   return (
     <>
-      <DropdownMenuSeparator className="md:hidden" />
-      <DropdownMenuItem className="md:hidden" onClick={() => setTheme("light")}>Theme: Light</DropdownMenuItem>
-      <DropdownMenuItem className="md:hidden" onClick={() => setTheme("dark")}>Theme: Dark</DropdownMenuItem>
-      <DropdownMenuItem className="md:hidden" onClick={() => setTheme("system")}>Theme: System</DropdownMenuItem>
+      <div className="my-2 border-t md:hidden" />
+      {THEME_OPTIONS.map(({ label, value, Icon }) => (
+        <button
+          key={value}
+          onClick={() => setTheme(value)}
+          className="flex items-center gap-3 w-full px-3 py-2.5 rounded-md text-sm font-medium hover:bg-muted transition-colors md:hidden"
+        >
+          <Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+          Theme: {label}
+        </button>
+      ))}
     </>
   );
 }

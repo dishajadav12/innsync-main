@@ -14,7 +14,7 @@ import { propertySchema } from "./schemas";
 import { Console } from "console";
 import { calculateTotals } from "./calculateTotals";
 import { formatDate } from "./format";
-import { toModelPayload } from "@/utils/recommendation";
+import { computeBackendScore, toModelPayload, type UserPreferences } from "@/utils/recommendation";
 
 const getAuthUser = async () => {
   const { userId } = auth();
@@ -304,6 +304,7 @@ export const fetchFavorites = async () => {
           price: true,
           country: true,
           image: true,
+          isOnHold: true,
         },
       },
     },
@@ -533,49 +534,26 @@ export const deleteBookingAction = async (prevState: { bookingId: string }) => {
 
 export const fetchRentals = async () => {
   const user = await getAuthUser();
+
+  // Two queries total regardless of rental count (was 1 + 2×N before).
   const rentals = await db.property.findMany({
-    where: {
-      profileId: user.id,
-    },
-    select: {
-      id: true,
-      name: true,
-      price: true,
-      isOnHold: true,
-    },
+    where:  { profileId: user.id },
+    select: { id: true, name: true, price: true, isOnHold: true },
   });
 
-  const rentalsWithBookingSums = await Promise.all(
-    rentals.map(async (rental) => {
-      const totalNightsSum = await db.booking.aggregate({
-        where: {
-          propertyId: rental.id,
-          paymentStatus: true,
-        },
-        _sum: {
-          totalNights: true,
-        },
-      });
+  const bookingStats = await db.booking.groupBy({
+    by:    ["propertyId"],
+    where: { propertyId: { in: rentals.map((r) => r.id) }, paymentStatus: true },
+    _sum:  { totalNights: true, orderTotal: true },
+  });
 
-      const orderTotalSum = await db.booking.aggregate({
-        where: {
-          propertyId: rental.id,
-          paymentStatus: true,
-        },
-        _sum: {
-          orderTotal: true,
-        },
-      });
+  const statsById = new Map(bookingStats.map((s) => [s.propertyId, s._sum]));
 
-      return {
-        ...rental,
-        totalNightsSum: totalNightsSum._sum.totalNights,
-        orderTotalSum: orderTotalSum._sum.orderTotal,
-      };
-    })
-  );
-
-  return rentalsWithBookingSums;
+  return rentals.map((rental) => ({
+    ...rental,
+    totalNightsSum: statsById.get(rental.id)?.totalNights ?? null,
+    orderTotalSum:  statsById.get(rental.id)?.orderTotal  ?? null,
+  }));
 };
 
 export async function deleteRentalAction(prevState: { propertyId: string }) {
@@ -716,13 +694,11 @@ export const fetchChartsData = async () => {
   const bookings = await db.booking.findMany({
     where: {
       paymentStatus: true,
-      createdAt: {
-        gte: sixMonthsAgo,
-      },
+      createdAt: { gte: sixMonthsAgo },
     },
-    orderBy: {
-      createdAt: "asc",
-    },
+    orderBy: { createdAt: "asc" },
+    take:   5000,
+    select: { createdAt: true },
   });
   let bookingsPerMonth = bookings.reduce((total, current) => {
     const date = formatDate(current.createdAt, true);
@@ -798,27 +774,199 @@ const swapHeldPropertyInCollections = async (
 
   if (affectedItems.length === 0) return;
 
-  for (const item of affectedItems) {
-    const idsInCollection = item.collection.items.map((i: { propertyId: string }) => i.propertyId);
-    const excludedIds = Array.from(new Set([...idsInCollection, heldPropertyId]));
+  await Promise.all(
+    affectedItems.map(async (item: (typeof affectedItems)[number]) => {
+      const idsInCollection = item.collection.items.map((i: { propertyId: string }) => i.propertyId);
+      const excludedIds     = Array.from(new Set([...idsInCollection, heldPropertyId]));
+      const replacement     = await findBestCollectionReplacement(item.collectionId, excludedIds);
 
-    const replacement = await findBestCollectionReplacement(item.collectionId, excludedIds);
+      if (replacement) {
+        return db.collectionItem.update({
+          where: { id: item.id },
+          data: {
+            propertyId:    replacement.id,
+            propertyName:  replacement.name,
+            propertyImage: replacement.image,
+            matchScore:    Math.round(replacement.averageRating * 10 + replacement.bookingCount),
+          },
+        });
+      }
+      return db.collectionItem.delete({ where: { id: item.id } });
+    })
+  );
+};
 
-    if (replacement) {
-      await db.collectionItem.update({
-        where: { id: item.id },
-        data: {
-          propertyId:    replacement.id,
-          propertyName:  replacement.name,
-          propertyImage: replacement.image,
-          matchScore:    Math.round(replacement.averageRating * 10 + replacement.bookingCount),
-        },
+// ── RecommendationSession invalidation and regeneration ──────────────────────
+// Sessions from the last 30 days are eligible for invalidation/regeneration.
+// Older sessions are kept as immutable historical record.
+const REGEN_LOOKBACK_MS = 30 * 24 * 60 * 60 * 1000;
+
+// Scores all currently-available properties against the given preferences and
+// returns the top 20 sorted results. Used as the shared core for both hold and
+// un-hold regeneration so the logic stays in one place.
+const buildReplacementResults = async (preferences: UserPreferences) => {
+  const candidates = await db.property.findMany({
+    where:   { isOnHold: false },
+    take:    100,
+    orderBy: { updatedAt: "desc" },
+    include: {
+      reviews:  { select: { rating: true, comment: true } },
+      bookings: { where: { paymentStatus: true }, select: { id: true } },
+    },
+  });
+
+  const scored = candidates
+    .map((p) => {
+      const payload = toModelPayload({
+        id:           p.id,
+        name:         p.name,
+        image:        p.image,
+        category:     p.category,
+        city:         p.city,
+        country:      p.country,
+        description:  p.description,
+        price:        p.price,
+        guests:       p.guests,
+        amenitiesRaw: p.amenities,
+        reviews:      p.reviews,
+        bookingCount: p.bookings.length,
       });
-    } else {
-      await db.collectionItem.delete({
-        where: { id: item.id },
-      });
-    }
+      const { score, reasons } = computeBackendScore(preferences, payload);
+      return { payload, score, reasons };
+    })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 20);
+
+  return { scored, totalAnalyzed: candidates.length };
+};
+
+// Creates a new active RecommendationSession that supersedes an old (invalidated)
+// one, and writes the supersededById link back onto the old session.
+const createSupersedingSession = async (
+  oldSessionId: string,
+  profileId:    string,
+  preferences:  UserPreferences,
+  aiSummary:    string
+): Promise<void> => {
+  const { scored, totalAnalyzed } = await buildReplacementResults(preferences);
+  if (scored.length === 0) return;
+
+  const newSession = await db.recommendationSession.create({
+    data: {
+      profileId,
+      preferences:    preferences as object,
+      topMatchReason: scored[0].reasons[0] ?? aiSummary,
+      totalAnalyzed,
+      modelUsed:      "regenerated-backend",
+      status:         "active",
+      results: {
+        create: scored.map(({ payload, score, reasons }, idx) => ({
+          propertyId:     payload.id,
+          propertyName:   payload.name,
+          rank:           idx + 1,
+          matchScore:     score,
+          matchReasons:   reasons,
+          strengths:      [`Rating: ${payload.averageRating}`, `Bookings: ${payload.bookingCount}`],
+          concerns:       [],
+          reviewInsights: { commonPositiveThemes: [], commonNegativeThemes: [] },
+          budgetFit:      { withinBudget: true, priceAssessment: "" },
+          amenityMatch:   { matched: [], missing: [] },
+          aiSummary:      reasons[0] ?? aiSummary,
+        })),
+      },
+    },
+  });
+
+  await db.recommendationSession.update({
+    where: { id: oldSessionId },
+    data:  { supersededById: newSession.id },
+  });
+};
+
+// Called when a property goes ON hold.
+// Finds active sessions from the last 30 days that referenced this property,
+// marks them invalidated, then regenerates one fresh session per affected user
+// (using the most recent session's stored preferences, excluding held properties).
+const invalidateAndRegenerateSessionsForHold = async (
+  heldPropertyId:   string,
+  heldPropertyName: string
+): Promise<void> => {
+  const since = new Date(Date.now() - REGEN_LOOKBACK_MS);
+
+  const affected = await db.recommendationSession.findMany({
+    where: {
+      status:    "active",
+      createdAt: { gte: since },
+      results:   { some: { propertyId: heldPropertyId } },
+    },
+    select: { id: true, profileId: true, preferences: true, createdAt: true },
+  });
+
+  if (affected.length === 0) return;
+
+  await db.recommendationSession.updateMany({
+    where: { id: { in: affected.map((s) => s.id) } },
+    data: {
+      status:             "invalidated",
+      invalidatedAt:      new Date(),
+      invalidationReason: `Property "${heldPropertyName}" was put on hold`,
+    },
+  });
+
+  // De-duplicate by user: if a user had multiple affected sessions, only
+  // regenerate from the most recent one to avoid redundant new sessions.
+  const perUser = new Map<string, (typeof affected)[number]>();
+  for (const s of affected) {
+    if (!s.profileId) continue;
+    const existing = perUser.get(s.profileId);
+    if (!existing || s.createdAt > existing.createdAt) perUser.set(s.profileId, s);
+  }
+
+  for (const [profileId, session] of Array.from(perUser.entries())) {
+    await createSupersedingSession(
+      session.id,
+      profileId,
+      session.preferences as unknown as UserPreferences,
+      "Regenerated after property hold"
+    );
+  }
+};
+
+// Called when a property comes OFF hold.
+// Finds invalidated sessions from the last 30 days that referenced this property
+// and regenerates one fresh session per affected user, now with the property
+// back in the candidate pool.
+const regenerateSessionsForUnhold = async (
+  propertyId:   string,
+  propertyName: string
+): Promise<void> => {
+  const since = new Date(Date.now() - REGEN_LOOKBACK_MS);
+
+  const affected = await db.recommendationSession.findMany({
+    where: {
+      status:    "invalidated",
+      createdAt: { gte: since },
+      results:   { some: { propertyId } },
+    },
+    select: { id: true, profileId: true, preferences: true, createdAt: true },
+  });
+
+  if (affected.length === 0) return;
+
+  const perUser = new Map<string, (typeof affected)[number]>();
+  for (const s of affected) {
+    if (!s.profileId) continue;
+    const existing = perUser.get(s.profileId);
+    if (!existing || s.createdAt > existing.createdAt) perUser.set(s.profileId, s);
+  }
+
+  for (const [profileId, session] of Array.from(perUser.entries())) {
+    await createSupersedingSession(
+      session.id,
+      profileId,
+      session.preferences as unknown as UserPreferences,
+      `Regenerated after "${propertyName}" was reinstated`
+    );
   }
 };
 
@@ -844,13 +992,16 @@ export const togglePropertyHoldAction = async (prevState: {
 
     if (newHoldStatus) {
       await swapHeldPropertyInCollections(propertyId, property.name);
+      await invalidateAndRegenerateSessionsForHold(propertyId, property.name);
+    } else {
+      await regenerateSessionsForUnhold(propertyId, property.name);
     }
 
     revalidatePath("/admin/listings");
     return {
       message: newHoldStatus
-        ? `"${property.name}" put on hold. Saved collections updated.`
-        : `"${property.name}" is back on the market.`,
+        ? `"${property.name}" put on hold. Collections and recent recommendations updated.`
+        : `"${property.name}" is back on the market. Recommendations regenerated.`,
     };
   } catch (error) {
     return renderError(error);
@@ -883,6 +1034,7 @@ export const toggleHostPropertyHoldAction = async (prevState: {
 export const fetchAllPropertiesForAdmin = async () => {
   await getAdminUser();
   return db.property.findMany({
+    take:    500,
     orderBy: { createdAt: "desc" },
     select: {
       id: true,
@@ -1025,7 +1177,7 @@ export const saveToCollectionAction = async (prevState: {
 
 export const fetchUserCollections = async () => {
   const user = await getAuthUser();
-  return db.collection.findMany({
+  const collections = await db.collection.findMany({
     where:   { profileId: user.id },
     orderBy: { updatedAt: "desc" },
     include: {
@@ -1033,6 +1185,22 @@ export const fetchUserCollections = async () => {
       _count: { select: { items: true } },
     },
   });
+
+  // Fetch hold status for all referenced properties in one query
+  const allPropertyIds = collections.flatMap((c) => c.items.map((i) => i.propertyId));
+  const heldProperties = await db.property.findMany({
+    where: { id: { in: allPropertyIds }, isOnHold: true },
+    select: { id: true },
+  });
+  const heldSet = new Set(heldProperties.map((p) => p.id));
+
+  return collections.map((collection) => ({
+    ...collection,
+    items: collection.items.map((item) => ({
+      ...item,
+      isOnHold: heldSet.has(item.propertyId),
+    })),
+  }));
 };
 
 export const removeFromCollectionAction = async (prevState: {
@@ -1051,6 +1219,16 @@ export const removeFromCollectionAction = async (prevState: {
   } catch (error) {
     return renderError(error);
   }
+};
+
+// Sessions older than 90 days are deleted. RecommendationResult rows cascade automatically.
+export const cleanupOldRecommendationSessionsAction = async (): Promise<{ message: string }> => {
+  await getAdminUser();
+  const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+  const { count } = await db.recommendationSession.deleteMany({
+    where: { createdAt: { lt: cutoff } },
+  });
+  return { message: `Pruned ${count} recommendation session${count !== 1 ? "s" : ""} older than 90 days.` };
 };
 
 export const fetchRecommendationSessions = async () => {

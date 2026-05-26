@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import FormContainer from "@/components/form/FormContainer";
 import { SubmitButton } from "@/components/form/Buttons";
 import { fetchUserCollections, removeFromCollectionAction } from "@/utils/actions";
-import { LuArrowLeft } from "react-icons/lu";
+import { LuArrowLeft, LuAlertTriangle } from "react-icons/lu";
 
 function timeAgo(date: Date): string {
   const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -66,16 +66,31 @@ async function CollectionDetailPage({ params }: { params: { id: string } }) {
                     src={item.propertyImage}
                     alt={item.propertyName}
                     fill
-                    className="object-cover"
+                    className={`object-cover ${item.isOnHold ? "opacity-60 grayscale-[30%]" : ""}`}
                     sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                   />
-                  {item.matchScore != null && (
+                  {item.matchScore != null && !item.isOnHold && (
                     <span className="absolute top-2 right-2 text-xs font-semibold rounded-full px-2.5 py-0.5 bg-white/90 text-black shadow-sm">
                       {item.matchScore}% match
                     </span>
                   )}
+                  {item.isOnHold && (
+                    <div className="absolute inset-0 flex items-center justify-center">
+                      <span className="bg-yellow-400/80 text-yellow-900 text-xs font-semibold px-3 py-1 rounded-full backdrop-blur-sm">
+                        Currently unavailable
+                      </span>
+                    </div>
+                  )}
                 </div>
               </Link>
+              {item.isOnHold && (
+                <div className="flex items-start gap-2 px-3 pt-2.5 pb-1 bg-yellow-50/80 border-b border-yellow-100">
+                  <LuAlertTriangle className="w-3.5 h-3.5 text-yellow-600 shrink-0 mt-0.5" />
+                  <p className="text-xs text-yellow-800 leading-snug">
+                    This property is temporarily on hold and may not be available for booking.
+                  </p>
+                </div>
+              )}
               <CardContent className="p-3 space-y-1">
                 <Link href={`/properties/${item.propertyId}`}>
                   <p className="font-medium text-sm leading-snug hover:underline line-clamp-1">

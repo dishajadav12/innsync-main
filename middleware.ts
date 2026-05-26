@@ -5,10 +5,9 @@ import { NextResponse } from "next/server";
 const isPublicRoute = createRouteMatcher([
   "/",
   "/properties(.*)",
-  "/recommendations(.*)",
-  "/api/recommendations(.*)",
   "/api/health/db",
 ]);
+
 
 const isAdminRoute = createRouteMatcher(["/admin(.*)"]);
 export default clerkMiddleware((auth, req) => {
