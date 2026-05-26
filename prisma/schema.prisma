@@ -8,6 +8,11 @@ generator client {
   provider = "prisma-client-js"
 }
 
+generator erd {
+  provider = "prisma-erd-generator"
+  puppeteerConfig = "./puppeteerConfig.json"
+}
+
 model Profile {
   id                     String                  @id @default(uuid())
   clerkId                String                  @unique
