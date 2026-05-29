@@ -207,8 +207,7 @@ export const fetchProperties = async ({
     });
     return properties;
   } catch (error) {
-    console.error("Failed to fetch properties:", error);
-    return [];
+    throw error;
   }
 };
 
