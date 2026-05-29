@@ -225,6 +225,7 @@ const recommendationSchema = z.object({
         missing: z.array(z.string()),
       }),
       aiSummary: z.string(),
+      tierLabel: z.string().optional(),
     })
   ),
 });
@@ -259,8 +260,8 @@ export const SCORE_WEIGHTS = {
   AMENITY_NICETOHAVE_MISS: -2,
 
   // Budget: compared price-per-guest so group properties are not penalized
-  BUDGET_WITHIN_MAX:       20,
-  BUDGET_BELOW_MIN:        -8,
+  BUDGET_WITHIN_MAX:       25,
+  BUDGET_BELOW_MIN:        -16,
   BUDGET_OVER_PER_10:      -1,   // -1 per $10 over budget (per guest)
   BUDGET_OVER_CAP:        -40,
 
@@ -764,6 +765,95 @@ export const buildFallbackResponse = (
     }),
   } satisfies RecommendationResponse;
 };
+
+export function splitIntoBudgetTiers<T extends { property: { price: number } }>(
+  items: T[],
+  minPrice: number,
+  maxPrice: number,
+  tierCount: number
+): Map<string, T[]> {
+  const tiers = new Map<string, T[]>();
+  if (minPrice >= maxPrice || tierCount <= 1) {
+    const label = `$${minPrice}+`;
+    tiers.set(label, [...items]);
+    return tiers;
+  }
+
+  const range = maxPrice - minPrice;
+  const step = range / tierCount;
+
+  // Build tier labels and empty buckets
+  const tierLabels: string[] = [];
+  for (let i = 0; i < tierCount; i++) {
+    const floor = Math.round(minPrice + i * step);
+    const label = `$${floor}+`;
+    tierLabels.push(label);
+    tiers.set(label, []);
+  }
+
+  for (const item of items) {
+    const price = item.property.price;
+    // Find which tier bucket this price falls in
+    let assigned = false;
+    for (let i = tierCount - 1; i >= 0; i--) {
+      const floor = minPrice + i * step;
+      if (price >= floor) {
+        tiers.get(tierLabels[i])!.push(item);
+        assigned = true;
+        break;
+      }
+    }
+    // Price below minPrice → assign to lowest tier
+    if (!assigned) {
+      tiers.get(tierLabels[0])!.push(item);
+    }
+  }
+
+  return tiers;
+}
+
+export function diversifyByBudgetTier<T extends { property: { price: number }; score: number }>(
+  items: T[],
+  preferences: UserPreferences,
+  slotsPerTier = 3
+): T[] {
+  const min = preferences.budget?.min;
+  const max = preferences.budget?.max;
+
+  // No budget preference or degenerate range → return unchanged
+  if (min == null || max == null || min >= max) return items;
+
+  const range = max - min;
+  const tierCount = range < 400 ? 2 : range <= 1200 ? 3 : 4;
+
+  const tierMap = splitIntoBudgetTiers(items, min, max, tierCount);
+
+  const selected: T[] = [];
+  const used = new Set<T>();
+
+  // Pass 1: take up to slotsPerTier from each tier (best score first within tier)
+  for (const [, bucket] of Array.from(tierMap)) {
+    const sorted = [...bucket].sort((a, b) => b.score - a.score);
+    let taken = 0;
+    for (const item of sorted) {
+      if (taken >= slotsPerTier) break;
+      if (!used.has(item)) {
+        selected.push(item);
+        used.add(item);
+        taken++;
+      }
+    }
+  }
+
+  // Pass 2: fill remaining slots from leftovers sorted by score
+  const remaining = items.filter((i) => !used.has(i)).sort((a, b) => b.score - a.score);
+  for (const item of remaining) {
+    if (selected.length >= items.length) break;
+    selected.push(item);
+  }
+
+  return selected;
+}
 
 export type SessionPersistInput = {
   profileId:      string | null;

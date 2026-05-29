@@ -8,6 +8,7 @@ import {
   buildPrompt,
   clampScore,
   computeBackendScore,
+  diversifyByBudgetTier,
   extractJsonObject,
   persistRecommendationSession,
   toModelPayload,
@@ -128,6 +129,24 @@ const diversifyByCategory = <T extends { property: { category: string } }>(
   }
 
   return [...preferredItems.slice(0, preferredCap), ...diverseOthers].slice(0, limit);
+};
+
+const computeTierLabel = (
+  price: number,
+  min: number | undefined,
+  max: number | undefined
+): string => {
+  if (min == null || max == null || min >= max) return "";
+  const range = max - min;
+  const tierCount = range < 400 ? 2 : range <= 1200 ? 3 : 4;
+  const step = range / tierCount;
+  for (let i = tierCount - 1; i >= 0; i--) {
+    const floor = min + i * step;
+    if (price >= floor) {
+      return `$${Math.round(floor)}–$${Math.round(i === tierCount - 1 ? max : floor + step)}/night`;
+    }
+  }
+  return `$${min}–$${Math.round(min + step)}/night`;
 };
 
 export const POST = async (req: NextRequest) => {
@@ -253,10 +272,16 @@ export const POST = async (req: NextRequest) => {
     rankedScored = [...withAmenityMatch, ...withoutAmenityMatch];
   }
 
-  const scored = diversifyByCategory(
+  const categoryDiversified = diversifyByCategory(
     rankedScored,
     Math.max(shortlistSize, resultSize),
     preferences.preferredCategories ?? []
+  );
+
+  const scored = diversifyByBudgetTier(
+    categoryDiversified,
+    preferences,
+    3
   );
 
   const createdAtById = new Map(
@@ -297,7 +322,16 @@ export const POST = async (req: NextRequest) => {
   const geminiApiKey = process.env.GEMINI_API_KEY;
   if (!geminiApiKey) {
     const fallback = buildFallbackResponse(preferences, scored);
-    const sorted1  = sortByRelevance(fallback.recommendations).slice(0, resultSize);
+    const sorted1WithTiers = sortByRelevance(fallback.recommendations)
+      .slice(0, resultSize)
+      .map((r) => ({
+        ...r,
+        tierLabel: computeTierLabel(
+          scored.find((s) => s.property.id === r.propertyId)?.property.price ?? 0,
+          preferences.budget?.min,
+          preferences.budget?.max
+        ),
+      }));
     try {
       await persistRecommendationSession({
         profileId:      userId ?? null,
@@ -305,7 +339,7 @@ export const POST = async (req: NextRequest) => {
         topMatchReason: fallback.summary.topMatchReason,
         totalAnalyzed:  fallback.summary.totalAnalyzed,
         modelUsed:      "fallback",
-        results: sorted1.map((r, idx) => ({
+        results: sorted1WithTiers.map((r, idx) => ({
           propertyId:    r.propertyId,
           propertyName:  r.propertyName,
           rank:          idx + 1,
@@ -322,7 +356,7 @@ export const POST = async (req: NextRequest) => {
     } catch (err) {
       console.error("[RecommendationSession] persist failed:", err);
     }
-    return Response.json({ ...fallback, recommendations: sorted1 }, { status: 200 });
+    return Response.json({ ...fallback, recommendations: sorted1WithTiers }, { status: 200 });
   }
 
   try {
@@ -364,6 +398,11 @@ export const POST = async (req: NextRequest) => {
         propertyImage: propertyById.get(item.propertyId)?.image ?? item.propertyImage ?? "",
         city:          propertyById.get(item.propertyId)?.city  ?? item.city,
         state:         propertyById.get(item.propertyId)?.country ?? item.state,
+        tierLabel:     computeTierLabel(
+                         propertyById.get(item.propertyId)?.price ?? 0,
+                         preferences.budget?.min,
+                         preferences.budget?.max
+                       ),
       };
     });
 
@@ -395,7 +434,16 @@ export const POST = async (req: NextRequest) => {
     return Response.json({ ...validated, recommendations: sorted2 }, { status: 200 });
   } catch {
     const fallback2 = buildFallbackResponse(preferences, scored);
-    const sorted3   = sortByRelevance(fallback2.recommendations).slice(0, resultSize);
+    const sorted3WithTiers = sortByRelevance(fallback2.recommendations)
+      .slice(0, resultSize)
+      .map((r) => ({
+        ...r,
+        tierLabel: computeTierLabel(
+          scored.find((s) => s.property.id === r.propertyId)?.property.price ?? 0,
+          preferences.budget?.min,
+          preferences.budget?.max
+        ),
+      }));
     try {
       await persistRecommendationSession({
         profileId:      userId ?? null,
@@ -403,7 +451,7 @@ export const POST = async (req: NextRequest) => {
         topMatchReason: fallback2.summary.topMatchReason,
         totalAnalyzed:  fallback2.summary.totalAnalyzed,
         modelUsed:      "fallback",
-        results: sorted3.map((r, idx) => ({
+        results: sorted3WithTiers.map((r, idx) => ({
           propertyId:    r.propertyId,
           propertyName:  r.propertyName,
           rank:          idx + 1,
@@ -420,6 +468,6 @@ export const POST = async (req: NextRequest) => {
     } catch (err) {
       console.error("[RecommendationSession] persist failed:", err);
     }
-    return Response.json({ ...fallback2, recommendations: sorted3 }, { status: 200 });
+    return Response.json({ ...fallback2, recommendations: sorted3WithTiers }, { status: 200 });
   }
 };

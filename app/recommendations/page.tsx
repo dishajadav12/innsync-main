@@ -56,6 +56,7 @@ type RecommendationResponse = {
       missing: string[];
     };
     aiSummary: string;
+    tierLabel?: string;
   }>;
 };
 
@@ -272,6 +273,21 @@ function RecommendationPage() {
 
     return items;
   }, [preferences]);
+
+  const groupedByTier = useMemo(() => {
+    if (!result) return [];
+    const tierOrder: string[] = [];
+    const tierMap = new Map<string, typeof result.recommendations>();
+    for (const rec of result.recommendations) {
+      const label = rec.tierLabel || "All Results";
+      if (!tierMap.has(label)) {
+        tierMap.set(label, []);
+        tierOrder.push(label);
+      }
+      tierMap.get(label)!.push(rec);
+    }
+    return tierOrder.map((label) => ({ label, items: tierMap.get(label)! }));
+  }, [result]);
 
   const handleSubmit = async () => {
     const startedAt = Date.now();
@@ -608,85 +624,98 @@ function RecommendationPage() {
             </p>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-5">
-            {result.recommendations.map((item) => (
-              <Card key={item.propertyId} className="overflow-hidden rounded-2xl border shadow-sm">
-                {item.propertyImage ? (
-                  <div className="relative w-full h-56">
-                    <Image
-                      src={item.propertyImage}
-                      alt={item.propertyName}
-                      fill
-                      className="object-cover"
-                      sizes="(max-width: 1024px) 100vw, 50vw"
-                    />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
-                    <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3">
-                      <p className="text-sm sm:text-base text-white font-semibold line-clamp-2">{item.propertyName}</p>
-                      <span className="text-xs font-semibold rounded-full px-3 py-1 bg-white/90 text-black whitespace-nowrap">
-                        {item.matchScore}% match
-                      </span>
-                    </div>
-                  </div>
-                ) : null}
+          {groupedByTier.map(({ label, items }) => (
+            <div key={label} className="mb-8">
+              {label !== "All Results" && (
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="h-px flex-1 bg-border" />
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-widest px-2">
+                    {label}
+                  </span>
+                  <div className="h-px flex-1 bg-border" />
+                </div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {items.map((item) => (
+                  <Card key={item.propertyId} className="overflow-hidden rounded-2xl border shadow-sm">
+                    {item.propertyImage ? (
+                      <div className="relative w-full h-56">
+                        <Image
+                          src={item.propertyImage}
+                          alt={item.propertyName}
+                          fill
+                          className="object-cover"
+                          sizes="(max-width: 1024px) 100vw, 50vw"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-black/10 to-transparent" />
+                        <div className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3">
+                          <p className="text-sm sm:text-base text-white font-semibold line-clamp-2">{item.propertyName}</p>
+                          <span className="text-xs font-semibold rounded-full px-3 py-1 bg-white/90 text-black whitespace-nowrap">
+                            {item.matchScore}% match
+                          </span>
+                        </div>
+                      </div>
+                    ) : null}
 
-                <CardContent className="space-y-3 pt-5">
-                  {!item.propertyImage ? (
-                    <div className="flex items-center justify-between gap-4">
-                      <CardTitle className="text-base sm:text-lg">{item.propertyName}</CardTitle>
-                      <span className="text-xs font-semibold rounded-full px-3 py-1 bg-primary/15 text-primary">
-                        {item.matchScore}% match
-                      </span>
-                    </div>
-                  ) : null}
+                    <CardContent className="space-y-3 pt-5">
+                      {!item.propertyImage ? (
+                        <div className="flex items-center justify-between gap-4">
+                          <CardTitle className="text-base sm:text-lg">{item.propertyName}</CardTitle>
+                          <span className="text-xs font-semibold rounded-full px-3 py-1 bg-primary/15 text-primary">
+                            {item.matchScore}% match
+                          </span>
+                        </div>
+                      ) : null}
 
-                  {(item.city || item.state) && (
-                    <p className="text-xs sm:text-sm text-muted-foreground">
-                      {item.city ? `${item.city}, ` : ""}
-                      {item.state}
-                    </p>
-                  )}
+                      {(item.city || item.state) && (
+                        <p className="text-xs sm:text-sm text-muted-foreground">
+                          {item.city ? `${item.city}, ` : ""}
+                          {item.state}
+                        </p>
+                      )}
 
-                  <CardDescription className="text-xs sm:text-sm">{item.aiSummary}</CardDescription>
+                      <CardDescription className="text-xs sm:text-sm">{item.aiSummary}</CardDescription>
 
-                  <div className="grid sm:grid-cols-2 gap-3 text-xs sm:text-sm">
-                    <div className="rounded-lg bg-muted/40 p-3">
-                      <p className="font-medium mb-1">Why it matches</p>
-                      <p className="text-muted-foreground">
-                        {selectedPreferenceItems.join(" • ") || "No preferences selected"}
-                      </p>
-                    </div>
-                    <div className="rounded-lg bg-muted/40 p-3">
-                      <p className="font-medium mb-1">Budget</p>
-                      <p className="text-muted-foreground">{item.budgetFit.priceAssessment}</p>
-                    </div>
-                  </div>
+                      <div className="grid sm:grid-cols-2 gap-3 text-xs sm:text-sm">
+                        <div className="rounded-lg bg-muted/40 p-3">
+                          <p className="font-medium mb-1">Why it matches</p>
+                          <p className="text-muted-foreground">
+                            {selectedPreferenceItems.join(" • ") || "No preferences selected"}
+                          </p>
+                        </div>
+                        <div className="rounded-lg bg-muted/40 p-3">
+                          <p className="font-medium mb-1">Budget</p>
+                          <p className="text-muted-foreground">{item.budgetFit.priceAssessment}</p>
+                        </div>
+                      </div>
 
-                  <div className="text-xs sm:text-sm rounded-lg border p-3">
-                    <p className="font-medium mb-1">Amenity match</p>
-                    <p className="text-muted-foreground">
-                      Matched: {item.amenityMatch.matched.join(", ") || "None"}
-                    </p>
-                    <p className="text-muted-foreground">
-                      Missing: {item.amenityMatch.missing.join(", ") || "None"}
-                    </p>
-                  </div>
+                      <div className="text-xs sm:text-sm rounded-lg border p-3">
+                        <p className="font-medium mb-1">Amenity match</p>
+                        <p className="text-muted-foreground">
+                          Matched: {item.amenityMatch.matched.join(", ") || "None"}
+                        </p>
+                        <p className="text-muted-foreground">
+                          Missing: {item.amenityMatch.missing.join(", ") || "None"}
+                        </p>
+                      </div>
 
-                  <Button asChild className="w-full rounded-full">
-                    <Link href={`/properties/${item.propertyId}`}>View Property Details</Link>
-                  </Button>
-                  <SaveToCollectionButton
-                    propertyId={item.propertyId}
-                    propertyName={item.propertyName}
-                    propertyImage={item.propertyImage ?? ""}
-                    matchScore={item.matchScore}
-                    country={item.state ?? ""}
-                    city={item.city ?? ""}
-                  />
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+                      <Button asChild className="w-full rounded-full">
+                        <Link href={`/properties/${item.propertyId}`}>View Property Details</Link>
+                      </Button>
+                      <SaveToCollectionButton
+                        propertyId={item.propertyId}
+                        propertyName={item.propertyName}
+                        propertyImage={item.propertyImage ?? ""}
+                        matchScore={item.matchScore}
+                        country={item.state ?? ""}
+                        city={item.city ?? ""}
+                      />
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          ))}
         </section>
       )}
     </section>
